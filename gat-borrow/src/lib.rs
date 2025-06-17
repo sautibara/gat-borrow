@@ -1,5 +1,9 @@
 use std::{borrow::Borrow, ops::Deref};
 
+pub use gat_borrow_derive::{Reborrow, derive_reborrow};
+
+use crate as gat_borrow;
+
 pub trait ReborrowType<'a>: 'a {
     type Reborrow<'b>;
 }
@@ -14,46 +18,22 @@ pub trait Reborrow<'a>: ReborrowType<'a> {
         'a: 'b;
 }
 
-#[macro_export]
-macro_rules! derive_reborrow {
-    ($ident:ident $(, generics: [$($T:ident),*])?) => {
-        impl<'a $(, $($T: 'static + ?Sized)*)?> $crate::ReborrowType<'a> for $ident<'a $(, $($T)*)?> {
-            type Reborrow<'b> = $ident<'b $(, $($T)*)?>;
-        }
-
-        impl<'a $(, $($T: 'static + ?Sized)*)?> $crate::Reborrow<'a> for $ident<'a $(, $($T)*)?> {
-            fn reborrow<'b>(self) -> Self::Reborrow<'b>
-            where
-                'a: 'b,
-            {
-                self
-            }
-
-            fn reborrow_ref<'b>(&'b self) -> &'b Self::Reborrow<'b>
-            where
-                'a: 'b,
-            {
-                self
-            }
-        }
-    };
+derive_reborrow! {
+    #[allow(type_alias_bounds)]
+    type Ref<'a, T: 'static + ?Sized> = &'a T;
 }
 
-type Ref<'a, T> = &'a T;
-
-derive_reborrow!(Ref, generics: [T]);
-
-pub trait ToOwn<'a>: Reborrow<'a> {
+pub trait IntoOwned<'a>: Reborrow<'a> {
     type Owned: for<'b> ToRef<'b, Self::Reborrow<'b>>;
 
-    fn to_own(&self) -> Self::Owned;
+    fn into_owned(self) -> Self::Owned;
 }
 
-impl<'a, T: ToOwned + 'static + ?Sized> ToOwn<'a> for &'a T {
+impl<'a, T: ToOwned + 'static + ?Sized> IntoOwned<'a> for &'a T {
     type Owned = T::Owned;
 
-    fn to_own(&self) -> Self::Owned {
-        (*self).to_owned()
+    fn into_owned(self) -> Self::Owned {
+        self.to_owned()
     }
 }
 
@@ -67,15 +47,15 @@ impl<'a, O: Borrow<B> + 'static, B: ?Sized> ToRef<'a, &'a B> for O {
     }
 }
 
-pub enum Boo<'a, R: ToOwn<'a>> {
+pub enum Boo<'a, R: IntoOwned<'a>> {
     Reference(R),
     Owned(R::Owned),
 }
 
-impl<'a, R: ToOwn<'a>> Boo<'a, R> {
+impl<'a, R: IntoOwned<'a>> Boo<'a, R> {
     pub fn into_owned(self) -> R::Owned {
         match self {
-            Self::Reference(reference) => reference.to_own(),
+            Self::Reference(reference) => reference.into_owned(),
             Self::Owned(owned) => owned,
         }
     }
@@ -86,7 +66,7 @@ impl<'a, R: ToOwn<'a>> Boo<'a, R> {
     {
         match self {
             Self::Reference(reference) => {
-                *self = Self::Owned(reference.to_own());
+                *self = Self::Owned(reference.clone().into_owned());
                 match self {
                     Self::Reference(_) => unreachable!(),
                     Self::Owned(owned) => owned,
@@ -131,18 +111,18 @@ impl<'a, R: ToOwn<'a>> Boo<'a, R> {
     }
 }
 
-impl<'b, 'a: 'b, R: ToOwn<'a>> ToRef<'b, BooRef<'b, 'a, R>> for Boo<'a, R> {
+impl<'b, 'a: 'b, R: IntoOwned<'a>> ToRef<'b, BooRef<'b, 'a, R>> for Boo<'a, R> {
     fn to_ref(&'b self) -> BooRef<'b, 'a, R> {
         self.to_ref()
     }
 }
 
-pub enum BooRef<'b, 'a: 'b, R: ToOwn<'a>> {
+pub enum BooRef<'b, 'a: 'b, R: IntoOwned<'a>> {
     Reference(&'b R::Reborrow<'b>),
     Owned(R::Reborrow<'b>),
 }
 
-impl<'b, 'a: 'b, R: ToOwn<'a>> Deref for BooRef<'b, 'a, R> {
+impl<'b, 'a: 'b, R: IntoOwned<'a>> Deref for BooRef<'b, 'a, R> {
     type Target = R::Reborrow<'b>;
 
     fn deref(&self) -> &Self::Target {
@@ -153,7 +133,7 @@ impl<'b, 'a: 'b, R: ToOwn<'a>> Deref for BooRef<'b, 'a, R> {
     }
 }
 
-impl<'b, 'a: 'b, R: ToOwn<'a>> BooRef<'b, 'a, R> {
+impl<'b, 'a: 'b, R: IntoOwned<'a>> BooRef<'b, 'a, R> {
     pub fn into_owned_ref(self) -> R::Reborrow<'b>
     where
         R::Reborrow<'b>: Clone,
