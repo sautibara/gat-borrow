@@ -23,13 +23,34 @@ derive_reborrow! {
     type Ref<'a, T: 'static + ?Sized> = &'a T;
 }
 
-pub trait IntoOwned<'a>: Reborrow<'a> {
+pub trait IntoOwnedImpl<'a>: Reborrow<'a> {
     type Owned: for<'b> ToRef<'b, Self::Reborrow<'b>>;
 
     fn into_owned(self) -> Self::Owned;
 }
 
-impl<'a, T: ToOwned + 'static + ?Sized> IntoOwned<'a> for &'a T {
+pub trait IntoOwned<'a>:
+    for<'b, 'c> IntoOwnedImpl<
+        'a,
+        Reborrow<'b>: IntoOwnedImpl<
+            'b,
+            Owned: Into<Self::Owned>,
+            Reborrow<'c>: Into<Self::Reborrow<'c>>,
+        >,
+    >
+{
+}
+
+impl<'a, T> IntoOwned<'a> for T
+where
+    T: IntoOwnedImpl<'a>,
+    for<'b> Self::Reborrow<'b>: IntoOwnedImpl<'b>,
+    for<'b> <Self::Reborrow<'b> as IntoOwnedImpl<'b>>::Owned: Into<Self::Owned>,
+    for<'b, 'c> <Self::Reborrow<'b> as ReborrowType<'b>>::Reborrow<'c>: Into<Self::Reborrow<'c>>,
+{
+}
+
+impl<'a, T: ToOwned + 'static + ?Sized> IntoOwnedImpl<'a> for &'a T {
     type Owned = T::Owned;
 
     fn into_owned(self) -> Self::Owned {
@@ -47,15 +68,15 @@ impl<'a, O: Borrow<B> + 'static, B: ?Sized> ToRef<'a, &'a B> for O {
     }
 }
 
-pub enum Boo<'a, R: IntoOwned<'a>> {
-    Reference(R),
+pub enum Boo<'a, R: IntoOwnedImpl<'a>> {
+    Borrowed(R),
     Owned(R::Owned),
 }
 
-impl<'a, R: IntoOwned<'a>> Boo<'a, R> {
+impl<'a, R: IntoOwnedImpl<'a>> Boo<'a, R> {
     pub fn into_owned(self) -> R::Owned {
         match self {
-            Self::Reference(reference) => reference.into_owned(),
+            Self::Borrowed(reference) => reference.into_owned(),
             Self::Owned(owned) => owned,
         }
     }
@@ -65,10 +86,10 @@ impl<'a, R: IntoOwned<'a>> Boo<'a, R> {
         R: Clone,
     {
         match self {
-            Self::Reference(reference) => {
+            Self::Borrowed(reference) => {
                 *self = Self::Owned(reference.clone().into_owned());
                 match self {
-                    Self::Reference(_) => unreachable!(),
+                    Self::Borrowed(_) => unreachable!(),
                     Self::Owned(owned) => owned,
                 }
             }
@@ -81,7 +102,7 @@ impl<'a, R: IntoOwned<'a>> Boo<'a, R> {
         'a: 'b,
     {
         match self {
-            Self::Reference(reference) => BooRef::Reference(reference.reborrow_ref()),
+            Self::Borrowed(reference) => BooRef::Reference(reference.reborrow_ref()),
             Self::Owned(owned) => BooRef::Owned(owned.to_ref()),
         }
     }
@@ -99,7 +120,7 @@ impl<'a, R: IntoOwned<'a>> Boo<'a, R> {
     /// [`Reference`]: Boo::Reference
     #[must_use]
     pub const fn is_reference(&self) -> bool {
-        matches!(self, Self::Reference(..))
+        matches!(self, Self::Borrowed(..))
     }
 
     /// Returns `true` if the boo is [`Owned`].
@@ -111,18 +132,18 @@ impl<'a, R: IntoOwned<'a>> Boo<'a, R> {
     }
 }
 
-impl<'b, 'a: 'b, R: IntoOwned<'a>> ToRef<'b, BooRef<'b, 'a, R>> for Boo<'a, R> {
+impl<'b, 'a: 'b, R: IntoOwnedImpl<'a>> ToRef<'b, BooRef<'b, 'a, R>> for Boo<'a, R> {
     fn to_ref(&'b self) -> BooRef<'b, 'a, R> {
         self.to_ref()
     }
 }
 
-pub enum BooRef<'b, 'a: 'b, R: IntoOwned<'a>> {
+pub enum BooRef<'b, 'a: 'b, R: IntoOwnedImpl<'a>> {
     Reference(&'b R::Reborrow<'b>),
     Owned(R::Reborrow<'b>),
 }
 
-impl<'b, 'a: 'b, R: IntoOwned<'a>> Deref for BooRef<'b, 'a, R> {
+impl<'b, 'a: 'b, R: IntoOwnedImpl<'a>> Deref for BooRef<'b, 'a, R> {
     type Target = R::Reborrow<'b>;
 
     fn deref(&self) -> &Self::Target {
@@ -133,7 +154,7 @@ impl<'b, 'a: 'b, R: IntoOwned<'a>> Deref for BooRef<'b, 'a, R> {
     }
 }
 
-impl<'b, 'a: 'b, R: IntoOwned<'a>> BooRef<'b, 'a, R> {
+impl<'b, 'a: 'b, R: IntoOwnedImpl<'a>> BooRef<'b, 'a, R> {
     pub fn into_owned_ref(self) -> R::Reborrow<'b>
     where
         R::Reborrow<'b>: Clone,
