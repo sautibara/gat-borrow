@@ -2,13 +2,14 @@ use std::{borrow::Borrow, ops::Deref};
 
 pub use gat_borrow_derive::{Reborrow, derive_reborrow};
 
+// for macros
 use crate as gat_borrow;
 
 pub trait ReborrowType<'a>: 'a {
     type Reborrow<'b>;
 }
 
-pub trait Reborrow<'a>: ReborrowType<'a> {
+pub trait ReborrowMethods<'a>: ReborrowType<'a> {
     fn reborrow<'b>(self) -> Self::Reborrow<'b>
     where
         'a: 'b;
@@ -18,35 +19,64 @@ pub trait Reborrow<'a>: ReborrowType<'a> {
         'a: 'b;
 }
 
+pub trait Reborrow<'a>:
+    for<'b, 'c> ReborrowMethods<
+        'a,
+        Reborrow<'b>: ReborrowMethods<'b, Reborrow<'c>: Into<Self::Reborrow<'c>>>,
+    >
+{
+}
+
+impl<'a, T> Reborrow<'a> for T
+where
+    T: ReborrowMethods<'a>,
+    // We want the reborrow to be the same as [`Self`] aside from lifetimes, but we can't just use
+    //   [`Into`] or some other trait here; [`Self`] has a lifetime that we can't change - we
+    //   can't just write a `Self::Reborrow<'b>: Into<Self<'b>>` bound for example.
+    // Instead, we keep going down the chain in case users of the trait need to use [`Reborrow`]
+    //   on the reborrows too. This isn't as good as saying that the types are the same (other
+    //   traits that Self implements won't be included), but it's better than nothing.
+    // Also, if users of the trait need reborrows to implement traits, they could just add those
+    //   bounds in a where clause or something.
+    for<'b> T::Reborrow<'b>: ReborrowMethods<'b>,
+    // This ensures that the reborrow's [`Reborrow`] implementation effectively uses the same
+    //   types. We can do this here because the reborrow type can be given an arbitrary lifetime
+    //   now, so we don't run into the same problem as earlier :).
+    //   (We're using [`Into`] to signify that the types should be equal)
+    for<'b, 'c> <T::Reborrow<'b> as ReborrowType<'b>>::Reborrow<'c>: Into<T::Reborrow<'c>>,
+{
+}
+
 derive_reborrow! {
     #[allow(type_alias_bounds)]
     type Ref<'a, T: 'static + ?Sized> = &'a T;
 }
 
-pub trait IntoOwnedImpl<'a>: Reborrow<'a> {
+pub trait IntoOwnedImpl<'a>: ReborrowMethods<'a> + Clone {
     type Owned: for<'b> ToRef<'b, Self::Reborrow<'b>>;
 
-    fn into_owned(self) -> Self::Owned;
+    #[inline]
+    fn into_owned(self) -> Self::Owned {
+        self.to_own()
+    }
+
+    #[inline]
+    fn to_own(&self) -> Self::Owned {
+        self.clone().into_owned()
+    }
 }
 
 pub trait IntoOwned<'a>:
-    for<'b, 'c> IntoOwnedImpl<
-        'a,
-        Reborrow<'b>: IntoOwnedImpl<
-            'b,
-            Owned: Into<Self::Owned>,
-            Reborrow<'c>: Into<Self::Reborrow<'c>>,
-        >,
-    >
+    for<'b, 'c> IntoOwnedImpl<'a, Reborrow<'b>: IntoOwnedImpl<'b, Owned: Into<Self::Owned>>>
 {
 }
 
 impl<'a, T> IntoOwned<'a> for T
 where
+    // These closely mirror the same bounds on [`Reborrow`] above, for similar reasons.
     T: IntoOwnedImpl<'a>,
-    for<'b> Self::Reborrow<'b>: IntoOwnedImpl<'b>,
+    for<'b> Self::Reborrow<'b>: IntoOwnedImpl<'b> + Clone,
     for<'b> <Self::Reborrow<'b> as IntoOwnedImpl<'b>>::Owned: Into<Self::Owned>,
-    for<'b, 'c> <Self::Reborrow<'b> as ReborrowType<'b>>::Reborrow<'c>: Into<Self::Reborrow<'c>>,
 {
 }
 
@@ -81,13 +111,10 @@ impl<'a, R: IntoOwnedImpl<'a>> Boo<'a, R> {
         }
     }
 
-    pub fn to_mut(&mut self) -> &mut R::Owned
-    where
-        R: Clone,
-    {
+    pub fn to_mut(&mut self) -> &mut R::Owned {
         match self {
             Self::Borrowed(reference) => {
-                *self = Self::Owned(reference.clone().into_owned());
+                *self = Self::Owned(reference.to_own());
                 match self {
                     Self::Borrowed(_) => unreachable!(),
                     Self::Owned(owned) => owned,
@@ -115,11 +142,11 @@ impl<'a, R: IntoOwnedImpl<'a>> Boo<'a, R> {
         self.to_ref().into_owned_ref()
     }
 
-    /// Returns `true` if the boo is [`Reference`].
+    /// Returns `true` if the boo is [`Borrowed`].
     ///
-    /// [`Reference`]: Boo::Reference
+    /// [`Borrowed`]: Boo::Borrowed
     #[must_use]
-    pub const fn is_reference(&self) -> bool {
+    pub const fn is_borrowed(&self) -> bool {
         matches!(self, Self::Borrowed(..))
     }
 

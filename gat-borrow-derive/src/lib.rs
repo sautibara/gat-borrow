@@ -84,7 +84,7 @@ fn implement_reborrow(
             type Reborrow<#reborrow_lt> = #reborrow_ty;
         }
 
-        impl #impl_generics gat_borrow::Reborrow<#outer_lifetime> for #ident #ty_generics #where_clause {
+        impl #impl_generics gat_borrow::ReborrowMethods<#outer_lifetime> for #ident #ty_generics #where_clause {
             fn reborrow<'b>(self) -> Self::Reborrow<'b>
             where
                 #outer_lifetime: 'b,
