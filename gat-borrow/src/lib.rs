@@ -67,7 +67,7 @@ pub trait IntoOwnedImpl<'a>: ReborrowMethods<'a> + Clone {
 }
 
 pub trait IntoOwned<'a>:
-    for<'b, 'c> IntoOwnedImpl<'a, Reborrow<'b>: IntoOwnedImpl<'b, Owned: Into<Self::Owned>>>
+    for<'b> IntoOwnedImpl<'a, Reborrow<'b>: IntoOwnedImpl<'b, Owned: Into<Self::Owned>>>
 {
 }
 
