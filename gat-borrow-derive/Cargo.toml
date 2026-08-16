@@ -2,6 +2,10 @@
 name = "gat-borrow-derive"
 version = "0.1.0"
 edition = "2024"
+description = "Macros for the gat-borrow crate"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/sautibara/gat-borrow"
+readme = "README.md"
 
 [dependencies]
 quote = "1.0.35"
