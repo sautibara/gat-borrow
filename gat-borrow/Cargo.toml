@@ -8,7 +8,7 @@ repository = "https://github.com/sautibara/gat-borrow"
 readme = "README.md"
 
 [dependencies]
-gat-borrow-derive = { path = "../gat-borrow-derive/" }
+gat-borrow-derive = { version = "0.1.0", path = "../gat-borrow-derive/" }
 
 [lints]
 workspace = true
